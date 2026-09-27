@@ -66,6 +66,18 @@ func (i *ICoreWebView2) AddNewWindowRequested(eventHandler *ICoreWebView2NewWind
 	return nil
 }
 
+func (i *ICoreWebView2) AddContentLoading(eventHandler *ICoreWebView2ContentLoadingEventHandler, token *_EventRegistrationToken) error {
+	_, _, err := i.vtbl.AddContentLoading.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(eventHandler)),
+		uintptr(unsafe.Pointer(token)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
 func (e *ICoreWebView2Environment) AddNewBrowserVersionAvailable(eventHandler *ICoreWebView2NewBrowserVersionAvailableEventHandler, token *_EventRegistrationToken) error {
 	_, _, err := e.vtbl.AddNewBrowserVersionAvailable.Call(
 		uintptr(unsafe.Pointer(e)),
@@ -102,6 +114,15 @@ func (e *Chromium) NavigationStarting(sender *ICoreWebView2, args *ICoreWebView2
 func (e *Chromium) NewWindowRequested(sender *ICoreWebView2, args *ICoreWebView2NewWindowRequestedEventArgs) uintptr {
 	if e.NewWindowRequestedCallback != nil {
 		e.NewWindowRequestedCallback(sender, args)
+	}
+	return 0
+}
+
+// ContentLoading is a document actually becoming this page. See the
+// comment on its event args for why that is not NavigationStarting.
+func (e *Chromium) ContentLoading(sender *ICoreWebView2, args *ICoreWebView2ContentLoadingEventArgs) uintptr {
+	if e.ContentLoadingCallback != nil {
+		e.ContentLoadingCallback(sender, args)
 	}
 	return 0
 }

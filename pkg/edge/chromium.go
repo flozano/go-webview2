@@ -30,6 +30,7 @@ type Chromium struct {
 	navigationStarting    *ICoreWebView2NavigationStartingEventHandler
 	newWindowRequested    *ICoreWebView2NewWindowRequestedEventHandler
 	newBrowserVersion     *ICoreWebView2NewBrowserVersionAvailableEventHandler
+	contentLoading        *ICoreWebView2ContentLoadingEventHandler
 
 	environment *ICoreWebView2Environment
 
@@ -59,6 +60,17 @@ type Chromium struct {
 	// runtime has been replaced under a process that is still using
 	// the old one.
 	NewBrowserVersionAvailableCallback func(sender *ICoreWebView2Environment)
+	// ContentLoadingCallback runs when a document actually begins being
+	// the page, which is the moment the previous one is over. A
+	// navigation that starts may never land.
+	ContentLoadingCallback func(sender *ICoreWebView2, args *ICoreWebView2ContentLoadingEventArgs)
+	// MessageWithSourceCallback is MessageCallback plus the URL of the
+	// document that sent it, which the event args carry and the plain
+	// callback throws away. A host that has to know who is calling
+	// should not have to ask the window afterwards and hope nothing
+	// moved in between. When this is set, MessageCallback is not
+	// called.
+	MessageWithSourceCallback func(source, message string)
 }
 
 func NewChromium() *Chromium {
@@ -84,6 +96,7 @@ func NewChromium() *Chromium {
 	e.navigationStarting = newICoreWebView2NavigationStartingEventHandler(e)
 	e.newWindowRequested = newICoreWebView2NewWindowRequestedEventHandler(e)
 	e.newBrowserVersion = newICoreWebView2NewBrowserVersionAvailableEventHandler(e)
+	e.contentLoading = newICoreWebView2ContentLoadingEventHandler(e)
 	e.permissions = make(map[CoreWebView2PermissionKind]CoreWebView2PermissionState)
 
 	return e
@@ -244,6 +257,7 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 	// is an event somebody will get wrong once.
 	_ = e.webview.AddNavigationStarting(e.navigationStarting, &token)
 	_ = e.webview.AddNewWindowRequested(e.newWindowRequested, &token)
+	_ = e.webview.AddContentLoading(e.contentLoading, &token)
 	if e.environment != nil {
 		_ = e.environment.AddNewBrowserVersionAvailable(e.newBrowserVersion, &token)
 	}
@@ -265,13 +279,22 @@ func (e *Chromium) MessageReceived(sender *ICoreWebView2, args *iCoreWebView2Web
 		uintptr(unsafe.Pointer(args)),
 		uintptr(unsafe.Pointer(&message)),
 	)
-	if e.MessageCallback != nil {
+	if e.MessageWithSourceCallback != nil {
+		var source *uint16
+		_, _, _ = args.vtbl.GetSource.Call(
+			uintptr(unsafe.Pointer(args)),
+			uintptr(unsafe.Pointer(&source)),
+		)
+		src := w32.Utf16PtrToString(source)
+		windows.CoTaskMemFree(unsafe.Pointer(source))
+		e.MessageWithSourceCallback(src, w32.Utf16PtrToString(message))
+	} else if e.MessageCallback != nil {
 		e.MessageCallback(w32.Utf16PtrToString(message))
 	}
-	_, _, _ = sender.vtbl.PostWebMessageAsString.Call(
-		uintptr(unsafe.Pointer(sender)),
-		uintptr(unsafe.Pointer(message)),
-	)
+	// The message is NOT posted back. Upstream echoes it, which sends
+	// every message a page posts to the host straight back to the page,
+	// where any chrome.webview listener sees it. Harmless for a demo
+	// and not for a host whose messages carry signed orders.
 	windows.CoTaskMemFree(unsafe.Pointer(message))
 	return 0
 }
