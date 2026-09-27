@@ -20,6 +20,11 @@ type Chromium struct {
 	controller            *ICoreWebView2Controller
 	webview               *ICoreWebView2
 	inited                uintptr
+	// failed says the browser did not start. Set by whichever
+	// completion handler was told so, and read by Embed after its
+	// wait: the handlers cannot return an error to anybody, because
+	// nobody in Go called them.
+	failed uintptr
 	envCompleted          *iCoreWebView2CreateCoreWebView2EnvironmentCompletedHandler
 	controllerCompleted   *iCoreWebView2CreateCoreWebView2ControllerCompletedHandler
 	webMessageReceived    *iCoreWebView2WebMessageReceivedEventHandler
@@ -142,8 +147,23 @@ func (e *Chromium) Embed(hwnd uintptr) bool {
 		_, _, _ = w32.User32TranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
 		_, _, _ = w32.User32DispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
 	}
+	if atomic.LoadUintptr(&e.failed) != 0 {
+		return false
+	}
 	e.Init("window.external={invoke:s=>window.chrome.webview.postMessage(s)}")
 	return true
+}
+
+// fail ends the wait in Embed and tells it what it is waiting for is
+// not coming.
+//
+// WHY NOT log.Fatalf, WHICH IS WHAT THIS USED TO DO. A library has no
+// business ending its caller's process, and this caller is an agent
+// that prints receipts: a browser that will not start must cost it a
+// window, never the till. Embed already has a way to say no.
+func (e *Chromium) fail() {
+	atomic.StoreUintptr(&e.failed, 1)
+	atomic.StoreUintptr(&e.inited, 1) // so the wait in Embed ends
 }
 
 func (e *Chromium) Navigate(url string) {
@@ -169,9 +189,18 @@ func (e *Chromium) Init(script string) {
 }
 
 func (e *Chromium) Eval(script string) {
+	// NOT log.Fatal. UTF16PtrFromString refuses a string with a NUL in
+	// it, and what gets evaluated here is written by whoever is driving
+	// this webview -- in the caller this fork exists for, that includes
+	// text a server sent. Killing the process over one byte of somebody
+	// else's data is not a library's call to make.
 	_script, err := windows.UTF16PtrFromString(script)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("go-webview2: refusing to evaluate a script that is not valid UTF-16: %v", err)
+		return
+	}
+	if e.webview == nil {
+		return // no browser; nothing to run it
 	}
 
 	_, _, _ = e.webview.vtbl.ExecuteScript.Call(
@@ -202,8 +231,18 @@ func (e *Chromium) Release() uintptr {
 }
 
 func (e *Chromium) EnvironmentCompleted(res uintptr, env *ICoreWebView2Environment) uintptr {
-	if int64(res) < 0 {
-		log.Fatalf("Creating environment failed with %08x", res)
+	// int32, NOT int64. An HRESULT is 32 bits and arrives here in a
+	// uintptr: on amd64 that is zero-extended, so 0x80070005 -- a
+	// failure -- is a large POSITIVE int64 and the test never fires.
+	// What used to happen next was env.vtbl on a nil env, which is a
+	// nil dereference in a COM callback, blamed on everything except
+	// the browser that did not start.
+	//
+	// And a nil env with a success code is the same situation wearing
+	// a better number, so it is the same branch.
+	if int32(res) < 0 || env == nil {
+		e.fail()
+		return res
 	}
 	_, _, _ = env.vtbl.AddRef.Call(uintptr(unsafe.Pointer(env)))
 	e.environment = env
@@ -217,8 +256,9 @@ func (e *Chromium) EnvironmentCompleted(res uintptr, env *ICoreWebView2Environme
 }
 
 func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller *ICoreWebView2Controller) uintptr {
-	if int64(res) < 0 {
-		log.Fatalf("Creating controller failed with %08x", res)
+	if int32(res) < 0 || controller == nil {
+		e.fail()
+		return res
 	}
 	_, _, _ = controller.vtbl.AddRef.Call(uintptr(unsafe.Pointer(controller)))
 	e.controller = controller
@@ -333,7 +373,8 @@ func (e *Chromium) PermissionRequested(_ *ICoreWebView2, args *iCoreWebView2Perm
 func (e *Chromium) WebResourceRequested(sender *ICoreWebView2, args *ICoreWebView2WebResourceRequestedEventArgs) uintptr {
 	req, err := args.GetRequest()
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("go-webview2: could not read the intercepted request: %v", err)
+		return 0
 	}
 	if e.WebResourceRequestedCallback != nil {
 		e.WebResourceRequestedCallback(req, args)
@@ -342,9 +383,8 @@ func (e *Chromium) WebResourceRequested(sender *ICoreWebView2, args *ICoreWebVie
 }
 
 func (e *Chromium) AddWebResourceRequestedFilter(filter string, ctx COREWEBVIEW2_WEB_RESOURCE_CONTEXT) {
-	err := e.webview.AddWebResourceRequestedFilter(filter, ctx)
-	if err != nil {
-		log.Fatal(err)
+	if err := e.webview.AddWebResourceRequestedFilter(filter, ctx); err != nil {
+		log.Printf("go-webview2: could not add a web resource filter: %v", err)
 	}
 }
 
