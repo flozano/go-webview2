@@ -27,6 +27,9 @@ type Chromium struct {
 	webResourceRequested  *iCoreWebView2WebResourceRequestedEventHandler
 	acceleratorKeyPressed *ICoreWebView2AcceleratorKeyPressedEventHandler
 	navigationCompleted   *ICoreWebView2NavigationCompletedEventHandler
+	navigationStarting    *ICoreWebView2NavigationStartingEventHandler
+	newWindowRequested    *ICoreWebView2NewWindowRequestedEventHandler
+	newBrowserVersion     *ICoreWebView2NewBrowserVersionAvailableEventHandler
 
 	environment *ICoreWebView2Environment
 
@@ -42,6 +45,20 @@ type Chromium struct {
 	WebResourceRequestedCallback func(request *ICoreWebView2WebResourceRequest, args *ICoreWebView2WebResourceRequestedEventArgs)
 	NavigationCompletedCallback  func(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs)
 	AcceleratorKeyCallback       func(uint) bool
+
+	// NavigationStartingCallback runs before a navigation happens and
+	// may refuse it through the args. A host that cannot say no to a
+	// destination is a frame, not a host.
+	NavigationStartingCallback func(sender *ICoreWebView2, args *ICoreWebView2NavigationStartingEventArgs)
+	// NewWindowRequestedCallback runs when the page asks for a window:
+	// target=_blank, window.open. Claiming it through the args means
+	// WebView2 opens nothing, and whoever claims it owes the person
+	// something instead.
+	NewWindowRequestedCallback func(sender *ICoreWebView2, args *ICoreWebView2NewWindowRequestedEventArgs)
+	// NewBrowserVersionAvailableCallback runs when the Evergreen
+	// runtime has been replaced under a process that is still using
+	// the old one.
+	NewBrowserVersionAvailableCallback func(sender *ICoreWebView2Environment)
 }
 
 func NewChromium() *Chromium {
@@ -64,6 +81,9 @@ func NewChromium() *Chromium {
 	e.webResourceRequested = newICoreWebView2WebResourceRequestedEventHandler(e)
 	e.acceleratorKeyPressed = newICoreWebView2AcceleratorKeyPressedEventHandler(e)
 	e.navigationCompleted = newICoreWebView2NavigationCompletedEventHandler(e)
+	e.navigationStarting = newICoreWebView2NavigationStartingEventHandler(e)
+	e.newWindowRequested = newICoreWebView2NewWindowRequestedEventHandler(e)
+	e.newBrowserVersion = newICoreWebView2NewBrowserVersionAvailableEventHandler(e)
 	e.permissions = make(map[CoreWebView2PermissionKind]CoreWebView2PermissionState)
 
 	return e
@@ -218,6 +238,15 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 		uintptr(unsafe.Pointer(e.navigationCompleted)),
 		uintptr(unsafe.Pointer(&token)),
 	)
+	// Registered always, not only when a callback is set: the handlers
+	// are cheap and do nothing without one, and an event that has to be
+	// subscribed later, from another thread, after the browser exists,
+	// is an event somebody will get wrong once.
+	_ = e.webview.AddNavigationStarting(e.navigationStarting, &token)
+	_ = e.webview.AddNewWindowRequested(e.newWindowRequested, &token)
+	if e.environment != nil {
+		_ = e.environment.AddNewBrowserVersionAvailable(e.newBrowserVersion, &token)
+	}
 
 	_ = e.controller.AddAcceleratorKeyPressed(e.acceleratorKeyPressed, &token)
 
