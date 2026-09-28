@@ -15,16 +15,16 @@ import (
 )
 
 type Chromium struct {
-	hwnd                  uintptr
-	focusOnInit           bool
-	controller            *ICoreWebView2Controller
-	webview               *ICoreWebView2
-	inited                uintptr
+	hwnd        uintptr
+	focusOnInit bool
+	controller  *ICoreWebView2Controller
+	webview     *ICoreWebView2
+	inited      uintptr
 	// failed says the browser did not start. Set by whichever
 	// completion handler was told so, and read by Embed after its
 	// wait: the handlers cannot return an error to anybody, because
 	// nobody in Go called them.
-	failed uintptr
+	failed                uintptr
 	envCompleted          *iCoreWebView2CreateCoreWebView2EnvironmentCompletedHandler
 	controllerCompleted   *iCoreWebView2CreateCoreWebView2ControllerCompletedHandler
 	webMessageReceived    *iCoreWebView2WebMessageReceivedEventHandler
@@ -36,6 +36,7 @@ type Chromium struct {
 	newWindowRequested    *ICoreWebView2NewWindowRequestedEventHandler
 	newBrowserVersion     *ICoreWebView2NewBrowserVersionAvailableEventHandler
 	contentLoading        *ICoreWebView2ContentLoadingEventHandler
+	documentTitleChanged  *ICoreWebView2DocumentTitleChangedEventHandler
 
 	environment *ICoreWebView2Environment
 
@@ -69,6 +70,13 @@ type Chromium struct {
 	// the page, which is the moment the previous one is over. A
 	// navigation that starts may never land.
 	ContentLoadingCallback func(sender *ICoreWebView2, args *ICoreWebView2ContentLoadingEventArgs)
+
+	// DocumentTitleChangedCallback runs when the page changes what it
+	// calls itself. A single-page application does that without
+	// navigating, so a host that showed the title once would show a
+	// stale one all day. The new title is not handed over: read it
+	// with GetDocumentTitle, which is where it lives.
+	DocumentTitleChangedCallback func(sender *ICoreWebView2)
 	// MessageWithSourceCallback is MessageCallback plus the URL of the
 	// document that sent it, which the event args carry and the plain
 	// callback throws away. A host that has to know who is calling
@@ -102,6 +110,7 @@ func NewChromium() *Chromium {
 	e.newWindowRequested = newICoreWebView2NewWindowRequestedEventHandler(e)
 	e.newBrowserVersion = newICoreWebView2NewBrowserVersionAvailableEventHandler(e)
 	e.contentLoading = newICoreWebView2ContentLoadingEventHandler(e)
+	e.documentTitleChanged = newICoreWebView2DocumentTitleChangedEventHandler(e)
 	e.permissions = make(map[CoreWebView2PermissionKind]CoreWebView2PermissionState)
 
 	return e
@@ -298,6 +307,7 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 	_ = e.webview.AddNavigationStarting(e.navigationStarting, &token)
 	_ = e.webview.AddNewWindowRequested(e.newWindowRequested, &token)
 	_ = e.webview.AddContentLoading(e.contentLoading, &token)
+	_ = e.webview.AddDocumentTitleChanged(e.documentTitleChanged, &token)
 	if e.environment != nil {
 		_ = e.environment.AddNewBrowserVersionAvailable(e.newBrowserVersion, &token)
 	}

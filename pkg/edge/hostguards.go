@@ -225,3 +225,59 @@ func (e *Chromium) GetSource() (string, error) {
 	}
 	return e.webview.GetSource()
 }
+
+// GetDocumentTitle is what the page calls itself: its <title>.
+//
+// WHAT IT IS FOR. A host window that is not a browser still has to say
+// which application is inside it, and the honest place to read that
+// from is the page, not the host's own configuration -- one binary
+// serves several tenants, and each should show its own name without
+// anybody compiling it in.
+//
+// Read at the moment it is wanted, like GetSource, and re-read when
+// DocumentTitleChanged says so: a single-page application changes its
+// title without navigating.
+func (i *ICoreWebView2) GetDocumentTitle() (string, error) {
+	var _title *uint16
+	_, _, err := i.vtbl.GetDocumentTitle.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(&_title)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return "", err
+	}
+	title := windows.UTF16PtrToString(_title)
+	windows.CoTaskMemFree(unsafe.Pointer(_title))
+	return title, nil
+}
+
+// GetDocumentTitle on the browser this Chromium is driving, or
+// ErrNoBrowser when there is none.
+func (e *Chromium) GetDocumentTitle() (string, error) {
+	if e.webview == nil {
+		return "", ErrNoBrowser
+	}
+	return e.webview.GetDocumentTitle()
+}
+
+func (i *ICoreWebView2) AddDocumentTitleChanged(eventHandler *ICoreWebView2DocumentTitleChangedEventHandler, token *_EventRegistrationToken) error {
+	_, _, err := i.vtbl.AddDocumentTitleChanged.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(eventHandler)),
+		uintptr(unsafe.Pointer(token)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
+// DocumentTitleChanged is the page saying it now calls itself something
+// else. The title itself is not in the event: it is read back with
+// GetDocumentTitle, which is how the API declares it.
+func (e *Chromium) DocumentTitleChanged(sender *ICoreWebView2) uintptr {
+	if e.DocumentTitleChangedCallback != nil {
+		e.DocumentTitleChangedCallback(sender)
+	}
+	return 0
+}
