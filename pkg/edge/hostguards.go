@@ -133,3 +133,51 @@ func (e *Chromium) NewBrowserVersionAvailable(sender *ICoreWebView2Environment) 
 	}
 	return 0
 }
+
+// Reload is the button a browser has and a host window does not.
+//
+// A page that will not draw is the commonest thing that goes wrong in
+// front of a person, and in a browser they press F5 without thinking.
+// A host that embeds a webview and offers no way to reload leaves them
+// with nothing to try -- and the keyboard is not a way, because the
+// accelerators only reach the browser when it has the focus, which a
+// host window does not hand over by itself.
+func (i *ICoreWebView2) Reload() error {
+	_, _, err := i.vtbl.Reload.Call(uintptr(unsafe.Pointer(i)))
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
+// Stop is Reload's pair: what a person presses when a page is taking
+// too long and they would rather have the old one back.
+func (i *ICoreWebView2) Stop() error {
+	_, _, err := i.vtbl.Stop.Call(uintptr(unsafe.Pointer(i)))
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
+// Reload and Stop, on the Chromium, for callers that never see the
+// ICoreWebView2. Both are no-ops before the browser exists, which is
+// the state a window is in while it is still starting.
+func (e *Chromium) Reload() error {
+	if e.webview == nil {
+		return nil
+	}
+	return e.webview.Reload()
+}
+
+func (e *Chromium) Stop() error {
+	if e.webview == nil {
+		return nil
+	}
+	return e.webview.Stop()
+}
+
+// Controller is the webview's controller, for a host that has to place
+// it somewhere other than the whole client area -- beside a toolbar,
+// say -- or hand it the keyboard.
+func (e *Chromium) Controller() *ICoreWebView2Controller { return e.controller }
