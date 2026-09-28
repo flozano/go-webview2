@@ -20,6 +20,8 @@ package edge
 import (
 	"unsafe"
 
+	"github.com/jchv/go-webview2/internal/w32"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -181,3 +183,22 @@ func (e *Chromium) Stop() error {
 // it somewhere other than the whole client area -- beside a toolbar,
 // say -- or hand it the keyboard.
 func (e *Chromium) Controller() *ICoreWebView2Controller { return e.controller }
+
+// PutBoundsRect is PutBounds in numbers anybody can pass.
+//
+// PutBounds takes a w32.Rect, and w32 is an INTERNAL package: a caller
+// outside this module cannot name the type, so the method it belongs
+// to might as well not exist. Four coordinates are the whole argument,
+// and they cross a package boundary without help.
+func (i *ICoreWebView2Controller) PutBoundsRect(left, top, right, bottom int32) error {
+	return i.PutBounds(w32.Rect{Left: left, Top: top, Right: right, Bottom: bottom})
+}
+
+// PlaceBelow is what a host with a strip of buttons on top actually
+// wants: the page fills the client area except the first `top` pixels.
+func (e *Chromium) PlaceBelow(left, top, right, bottom int32) error {
+	if e.controller == nil {
+		return nil
+	}
+	return e.controller.PutBoundsRect(left, top, right, bottom)
+}
