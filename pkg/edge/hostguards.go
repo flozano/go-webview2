@@ -211,3 +211,17 @@ func (e *Chromium) PlaceBelow(left, top, right, bottom int32) error {
 	}
 	return e.controller.PutBoundsRect(left, top, right, bottom)
 }
+
+// GetSource on the browser this Chromium is driving, or ErrNoBrowser
+// when there is none.
+//
+// ASK, RATHER THAN REMEMBER. A host that recorded the last URL it let
+// through NavigationStarting would be right until the page changed
+// route without navigating, which is what a single-page application
+// does all day. The browser knows; nothing else does.
+func (e *Chromium) GetSource() (string, error) {
+	if e.webview == nil {
+		return "", ErrNoBrowser
+	}
+	return e.webview.GetSource()
+}
