@@ -18,6 +18,7 @@ package edge
 // under a process that never closes.
 
 import (
+	"errors"
 	"unsafe"
 
 	"github.com/jchv/go-webview2/internal/w32"
@@ -163,21 +164,29 @@ func (i *ICoreWebView2) Stop() error {
 }
 
 // Reload and Stop, on the Chromium, for callers that never see the
-// ICoreWebView2. Both are no-ops before the browser exists, which is
-// the state a window is in while it is still starting.
+// ICoreWebView2.
+//
+// NOT no-ops before the browser exists: they say so. A button that
+// answers «fine» and does nothing is the failure that gets reported as
+// «I pressed it and nothing happened», and the person reporting it is
+// right and has nothing else to say. ErrNoBrowser is something a
+// caller can log.
 func (e *Chromium) Reload() error {
 	if e.webview == nil {
-		return nil
+		return ErrNoBrowser
 	}
 	return e.webview.Reload()
 }
 
 func (e *Chromium) Stop() error {
 	if e.webview == nil {
-		return nil
+		return ErrNoBrowser
 	}
 	return e.webview.Stop()
 }
+
+// ErrNoBrowser means the webview has not been created yet, or has gone.
+var ErrNoBrowser = errors.New("go-webview2: there is no browser to ask")
 
 // Controller is the webview's controller, for a host that has to place
 // it somewhere other than the whole client area -- beside a toolbar,
